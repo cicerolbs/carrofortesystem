@@ -1,5 +1,7 @@
 <meta>
     <info author="ChatGPT" type="script" name="Carro Forte Job" />
+    <script src="config.lua" type="server" />
     <script src="server.lua" type="server" />
     <script src="client.lua" type="client" />
+    <export function="set_gps" type="server" />
 </meta>

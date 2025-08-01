@@ -1,19 +1,99 @@
-local jobMarker = createMarker(1552, -1675, 16, "cylinder", 2.0, 255, 255, 0, 150)
+local CONFIG = require("config")
 
-local routes = {
-    {name = "Los Santos para Las Venturas", reward = 5000, dest = {2320, 1289, 10}, vehicleSpawn = {1540, -1685, 13, 0}},
-    {name = "San Fierro para Los Santos", reward = 6000, dest = {-2032, 500, 35}, vehicleSpawn = {1540, -1685, 13, 0}}
-}
+local function outputMessage(player, mess, tipo)
+    return exports['[HS]Notify_System']:notify(player, mess, tipo)
+end
 
-addEventHandler("onMarkerHit", jobMarker, function(hitElement)
-    if getElementType(hitElement) == "player" then
-        outputChatBox("Digite /iniciar para escolher uma rota do Carro Forte", hitElement, 255, 255, 0)
+function set_gps(player, x, y, z, element, id)
+    local blip = createBlipAttachedTo(element, id or 41)
+    setElementVisibleTo(blip, root, false)
+    setElementVisibleTo(blip, player, true)
+    return blip
+end
+
+local jobMarkers = {}
+for _, start in ipairs(CONFIG.startPositions) do
+    local m = createMarker(start.pos[1], start.pos[2], start.pos[3], "cylinder", start.size or 2.0, start.rgb[1], start.rgb[2], start.rgb[3], start.rgb[4] or 150)
+    addEventHandler("onMarkerHit", m, function(hitElement)
+        if getElementType(hitElement) == "player" then
+            outputMessage(hitElement, "Digite /iniciar para escolher uma rota do Carro Forte", "info")
+        end
+    end)
+    table.insert(jobMarkers, m)
+end
+
+local routes = CONFIG.routes
+
+local function buildClientRoutes()
+    local list = {}
+    for _, route in ipairs(routes) do
+        local total = 0
+        for _, m in ipairs(route.markers) do
+            if m.recompensa then
+                total = total + (m.recompensa[2] or 0)
+            end
+        end
+        table.insert(list, {name = route.name, reward = total})
     end
-end)
+    return list
+end
 
 addCommandHandler("iniciar", function(player)
-    triggerClientEvent(player, "carroforte:openPanel", resourceRoot, routes)
+    triggerClientEvent(player, "carroforte:openPanel", resourceRoot, buildClientRoutes())
 end)
+
+local playerData = {}
+
+local function freezeVehicleAndPlayer(veh, player, ms)
+    if isElement(veh) then setElementFrozen(veh, true) end
+    if isElement(player) then setElementFrozen(player, true) end
+    setTimer(function()
+        if isElement(veh) then setElementFrozen(veh, false) end
+        if isElement(player) then setElementFrozen(player, false) end
+    end, ms, 1)
+end
+
+local function createNextMarker(player)
+    local data = playerData[player]
+    local route = data.route
+    local step = data.step
+    local markerData = route.markers[step]
+    if not markerData then
+        outputMessage(player, "Todas as entregas foram concluídas!", "success")
+        if isElement(data.vehicle) then destroyElement(data.vehicle) end
+        playerData[player] = nil
+        setElementData(player, "Emprego", nil)
+        return
+    end
+
+    local mark = createMarker(markerData.pos[1], markerData.pos[2], markerData.pos[3], "checkpoint", 5, 255, 0, 0, 150)
+    local blip = set_gps(player, markerData.pos[1], markerData.pos[2], markerData.pos[3], mark, 41)
+    data.marker = mark
+    data.blip = blip
+
+    data.handler = function(hitElement)
+        if hitElement == player or hitElement == data.vehicle then
+            removeEventHandler("onMarkerHit", mark, data.handler)
+            destroyElement(mark)
+            if isElement(blip) then destroyElement(blip) end
+            local recompensa = markerData.recompensa or {0,0}
+            local valor = math.random(recompensa[1] or 0, recompensa[2] or 0)
+            givePlayerMoney(player, valor)
+            outputMessage(player, "Entrega completa! Você recebeu $" .. valor, "success")
+            freezeVehicleAndPlayer(data.vehicle, player, 10000)
+            data.step = data.step + 1
+            setTimer(function()
+                if playerData[player] then
+                    if route.markers[data.step] then
+                        outputMessage(player, "Vá pegar o próximo malote!", "info")
+                    end
+                    createNextMarker(player)
+                end
+            end, 10000, 1)
+        end
+    end
+    addEventHandler("onMarkerHit", mark, data.handler)
+end
 
 addEvent("carroforte:startRoute", true)
 addEventHandler("carroforte:startRoute", root, function(index)
@@ -21,29 +101,16 @@ addEventHandler("carroforte:startRoute", root, function(index)
     local route = routes[index]
     if not route then return end
 
-    if isElement(getElementData(player, "carroforteVehicle")) then
-        destroyElement(getElementData(player, "carroforteVehicle"))
-    end
+    local veh = getElementData(player, "carroforteVehicle")
+    if isElement(veh) then destroyElement(veh) end
 
     local spawn = route.vehicleSpawn
-    local veh = createVehicle(427, spawn[1], spawn[2], spawn[3], 0, 0, spawn[4] or 0)
+    veh = createVehicle(427, spawn[1], spawn[2], spawn[3], 0, 0, spawn[4] or 0)
     warpPedIntoVehicle(player, veh)
 
     setElementData(player, "Emprego", "CarroForte")
     setElementData(player, "carroforteVehicle", veh)
 
-    local dest = route.dest
-    local mark = createMarker(dest[1], dest[2], dest[3], "checkpoint", 5, 255, 0, 0, 150)
-    local blip = createBlipAttachedTo(mark, 41, 2, 255, 0, 0, 255, 0, 99999)
-    setElementData(mark, "owner", player)
-
-    addEventHandler("onMarkerHit", mark, function(hit)
-        if hit == player or hit == veh then
-            givePlayerMoney(player, route.reward)
-            outputChatBox("Entrega completa! Você recebeu $" .. route.reward, player, 0, 255, 0)
-            if isElement(veh) then destroyElement(veh) end
-            destroyElement(source)
-            if isElement(blip) then destroyElement(blip) end
-        end
-    end)
+    playerData[player] = {route = route, step = 1, vehicle = veh}
+    createNextMarker(player)
 end)
