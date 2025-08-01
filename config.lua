@@ -1,4 +1,5 @@
-local CONFIG = {
+-- Global configuration accessible by other scripts
+CONFIG = {
     startPositions = {
         {pos = {1552, -1675, 16}, size = 2.0, rgb = {255, 255, 0, 150}},
     },
@@ -21,5 +22,3 @@ local CONFIG = {
         }
     }
 }
-
-return CONFIG
