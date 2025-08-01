@@ -60,6 +60,10 @@ local function createDeliveryMarker(player, markerData)
         setTimer(function()
             if not playerData[player] then return end
             setElementFrozen(player, false)
+            if isElement(data.caseObject) then
+                destroyElement(data.caseObject)
+                data.caseObject = nil
+            end
             local recompensa = markerData.recompensa or {0,0}
             local valor = math.random(recompensa[1] or 0, recompensa[2] or 0)
             givePlayerMoney(player, valor)
@@ -78,7 +82,9 @@ local function createPickMarker(player, markerData)
     local bx = vx - math.cos(math.rad(rz)) * 4
     local by = vy - math.sin(math.rad(rz)) * 4
     local pick = createMarker(bx, by, vz, "cylinder", 1.5, 0, 0, 255, 150)
+    local blip = set_gps(player, bx, by, vz, pick, 41)
     data.pickMarker = pick
+    data.pickBlip = blip
     exports['[HS]Target']:setTarget(player, {Vector3(bx, by, vz)}, {title = 'Marcação', hex = '#FFFFFF'})
     local function onPickHit(hit)
         if hit ~= player then return end
@@ -86,9 +92,23 @@ local function createPickMarker(player, markerData)
         local function onKey()
             unbindKey(player, "e", "down", onKey)
             if isElement(pick) then destroyElement(pick) end
+            if isElement(blip) then destroyElement(blip) end
             removeEventHandler("onMarkerHit", pick, onPickHit)
-            outputMessage(player, "Leve a maleta até o ponto indicado", "info")
-            createDeliveryMarker(player, markerData)
+            setElementFrozen(player, true)
+            outputMessage(player, "Pegando maleta...", "info")
+            local px, py, pz = getElementPosition(player)
+            -- 1210 corresponds to the briefcase model in GTA SA
+            local bag = createObject(1210, px, py, pz)
+            setElementCollisionsEnabled(bag, false)
+            setElementFrozen(bag, true)
+            attachElements(bag, player, 0.2, 0.2, 0, 0, 90, 0)
+            data.caseObject = bag
+            setTimer(function()
+                if not playerData[player] then return end
+                setElementFrozen(player, false)
+                outputMessage(player, "Leve a maleta até o ponto indicado", "info")
+                createDeliveryMarker(player, markerData)
+            end, 3000, 1)
         end
         bindKey(player, "e", "down", onKey)
     end
@@ -169,6 +189,9 @@ addCommandHandler("finalrota", function(player)
     if isElement(data.vehicle) then destroyElement(data.vehicle) end
     if isElement(data.finalBlip) then destroyElement(data.finalBlip) end
     if isElement(data.finishMarker) then destroyElement(data.finishMarker) end
+    if isElement(data.pickMarker) then destroyElement(data.pickMarker) end
+    if isElement(data.pickBlip) then destroyElement(data.pickBlip) end
+    if isElement(data.caseObject) then destroyElement(data.caseObject) end
     playerData[player] = nil
     setElementData(player, "Emprego", nil)
     outputMessage(player, "Rota finalizada!", "success")
