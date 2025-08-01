@@ -45,29 +45,76 @@ end)
 
 local playerData = {}
 
-local function freezeVehicleAndPlayer(veh, player, ms)
-    if isElement(veh) then setElementFrozen(veh, true) end
-    if isElement(player) then setElementFrozen(player, true) end
-    setTimer(function()
-        if isElement(veh) then setElementFrozen(veh, false) end
-        if isElement(player) then setElementFrozen(player, false) end
-    end, ms, 1)
+local function createDeliveryMarker(player, markerData)
+    local data = playerData[player]
+    local drop = markerData.dropPos or markerData.pos
+    local mark = createMarker(drop[1], drop[2], drop[3], "checkpoint", 2, 255, 255, 0, 150)
+    data.deliveryMarker = mark
+    exports['[HS]Target']:setTarget(player, {Vector3(drop[1], drop[2], drop[3])}, {title = 'Marcação', hex = '#FFFFFF'})
+    local function onDeliver(hit)
+        if hit ~= player then return end
+        removeEventHandler("onMarkerHit", mark, onDeliver)
+        destroyElement(mark)
+        setElementFrozen(player, true)
+        outputMessage(player, "Entregando malote...", "info")
+        setTimer(function()
+            if not playerData[player] then return end
+            setElementFrozen(player, false)
+            local recompensa = markerData.recompensa or {0,0}
+            local valor = math.random(recompensa[1] or 0, recompensa[2] or 0)
+            givePlayerMoney(player, valor)
+            outputMessage(player, "Malote entregue! Você recebeu $"..valor..". Volte ao carro forte.", "success")
+            data.step = data.step + 1
+            createNextMarker(player)
+        end, 5000, 1)
+    end
+    addEventHandler("onMarkerHit", mark, onDeliver)
 end
 
-local function createNextMarker(player)
+local function createPickMarker(player, markerData)
+    local data = playerData[player]
+    local vx, vy, vz = getElementPosition(data.vehicle)
+    local _, _, rz = getElementRotation(data.vehicle)
+    local bx = vx - math.cos(math.rad(rz)) * 4
+    local by = vy - math.sin(math.rad(rz)) * 4
+    local pick = createMarker(bx, by, vz, "cylinder", 1.5, 0, 0, 255, 150)
+    data.pickMarker = pick
+    exports['[HS]Target']:setTarget(player, {Vector3(bx, by, vz)}, {title = 'Marcação', hex = '#FFFFFF'})
+    local function onPickHit(hit)
+        if hit ~= player then return end
+        outputMessage(player, "Pressione E para pegar a maleta", "info")
+        local function onKey()
+            unbindKey(player, "e", "down", onKey)
+            if isElement(pick) then destroyElement(pick) end
+            removeEventHandler("onMarkerHit", pick, onPickHit)
+            outputMessage(player, "Leve a maleta até o ponto indicado", "info")
+            createDeliveryMarker(player, markerData)
+        end
+        bindKey(player, "e", "down", onKey)
+    end
+    addEventHandler("onMarkerHit", pick, onPickHit)
+end
+
+function createNextMarker(player)
     local data = playerData[player]
     local route = data.route
     local step = data.step
     local markerData = route.markers[step]
     if not markerData then
-        outputMessage(player, "Todas as entregas foram concluídas! Volte ao ponto inicial e digite /finalrota", "info")
+        outputMessage(player, "Todas as entregas foram concluídas! Vá ao ponto final e digite /finalrota", "info")
         if isElement(data.blip) then destroyElement(data.blip) end
-        local startPos = data.startPos or CONFIG.startPositions[1].pos
-        local blip = createBlip(startPos[1], startPos[2], startPos[3], 41)
-        setElementVisibleTo(blip, root, false)
-        setElementVisibleTo(blip, player, true)
+        local finish = CONFIG.finalPosition or CONFIG.startPositions[1].pos
+        local mark = createMarker(finish[1], finish[2], finish[3], "checkpoint", 5, 255, 0, 0, 150)
+        local blip = set_gps(player, finish[1], finish[2], finish[3], mark, 41)
+        data.finishMarker = mark
         data.finalBlip = blip
         data.finished = true
+        exports['[HS]Target']:setTarget(player, {Vector3(finish[1], finish[2], finish[3])}, {title = 'Marcação', hex = '#FFFFFF'})
+        addEventHandler("onMarkerHit", mark, function(hit)
+            if hit == player then
+                outputMessage(player, "Digite /finalrota para encerrar a rota", "info")
+            end
+        end)
         return
     end
 
@@ -75,26 +122,15 @@ local function createNextMarker(player)
     local blip = set_gps(player, markerData.pos[1], markerData.pos[2], markerData.pos[3], mark, 41)
     data.marker = mark
     data.blip = blip
+    exports['[HS]Target']:setTarget(player, {Vector3(markerData.pos[1], markerData.pos[2], markerData.pos[3])}, {title = 'Marcação', hex = '#FFFFFF'})
 
     data.handler = function(hitElement)
         if hitElement == player or hitElement == data.vehicle then
             removeEventHandler("onMarkerHit", mark, data.handler)
             destroyElement(mark)
             if isElement(blip) then destroyElement(blip) end
-            local recompensa = markerData.recompensa or {0,0}
-            local valor = math.random(recompensa[1] or 0, recompensa[2] or 0)
-            givePlayerMoney(player, valor)
-            outputMessage(player, "Entrega completa! Você recebeu $" .. valor, "success")
-            freezeVehicleAndPlayer(data.vehicle, player, 10000)
-            data.step = data.step + 1
-            setTimer(function()
-                if playerData[player] then
-                    if route.markers[data.step] then
-                        outputMessage(player, "Vá pegar o próximo malote!", "info")
-                    end
-                    createNextMarker(player)
-                end
-            end, 10000, 1)
+            outputMessage(player, "Desça do veículo e pegue o malote atrás do carro forte.", "info")
+            createPickMarker(player, markerData)
         end
     end
     addEventHandler("onMarkerHit", mark, data.handler)
@@ -116,19 +152,7 @@ addEventHandler("carroforte:startRoute", root, function(index)
     setElementData(player, "Emprego", "CarroForte")
     setElementData(player, "carroforteVehicle", veh)
 
-    -- Save nearest start position to require returning later
-    local px, py, pz = getElementPosition(player)
-    local nearest = CONFIG.startPositions[1].pos
-    local minDist = getDistanceBetweenPoints3D(px, py, pz, nearest[1], nearest[2], nearest[3])
-    for _, start in ipairs(CONFIG.startPositions) do
-        local dist = getDistanceBetweenPoints3D(px, py, pz, start.pos[1], start.pos[2], start.pos[3])
-        if dist < minDist then
-            minDist = dist
-            nearest = start.pos
-        end
-    end
-
-    playerData[player] = {route = route, step = 1, vehicle = veh, startPos = nearest}
+    playerData[player] = {route = route, step = 1, vehicle = veh}
     createNextMarker(player)
 end)
 
@@ -138,14 +162,13 @@ addCommandHandler("finalrota", function(player)
         outputMessage(player, "Você ainda não concluiu todas as entregas.", "error")
         return
     end
-    local startPos = data.startPos or CONFIG.startPositions[1].pos
-    local x, y, z = getElementPosition(player)
-    if getDistanceBetweenPoints3D(x, y, z, startPos[1], startPos[2], startPos[3]) > 5 then
-        outputMessage(player, "Vá até o ponto inicial para finalizar a rota.", "error")
+    if not data.finishMarker or not isElementWithinMarker(player, data.finishMarker) then
+        outputMessage(player, "Vá até o ponto final para finalizar a rota.", "error")
         return
     end
     if isElement(data.vehicle) then destroyElement(data.vehicle) end
     if isElement(data.finalBlip) then destroyElement(data.finalBlip) end
+    if isElement(data.finishMarker) then destroyElement(data.finishMarker) end
     playerData[player] = nil
     setElementData(player, "Emprego", nil)
     outputMessage(player, "Rota finalizada!", "success")
