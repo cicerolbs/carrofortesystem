@@ -1,4 +1,5 @@
-local CONFIG = require("config")
+-- Configuration table is loaded as a global from config.lua
+local CONFIG = _G.CONFIG
 
 local function outputMessage(player, mess, tipo)
     return exports['[HS]Notify_System']:notify(player, mess, tipo)
@@ -59,10 +60,14 @@ local function createNextMarker(player)
     local step = data.step
     local markerData = route.markers[step]
     if not markerData then
-        outputMessage(player, "Todas as entregas foram concluídas!", "success")
-        if isElement(data.vehicle) then destroyElement(data.vehicle) end
-        playerData[player] = nil
-        setElementData(player, "Emprego", nil)
+        outputMessage(player, "Todas as entregas foram concluídas! Volte ao ponto inicial e digite /finalrota", "info")
+        if isElement(data.blip) then destroyElement(data.blip) end
+        local startPos = data.startPos or CONFIG.startPositions[1].pos
+        local blip = createBlip(startPos[1], startPos[2], startPos[3], 41)
+        setElementVisibleTo(blip, root, false)
+        setElementVisibleTo(blip, player, true)
+        data.finalBlip = blip
+        data.finished = true
         return
     end
 
@@ -111,6 +116,37 @@ addEventHandler("carroforte:startRoute", root, function(index)
     setElementData(player, "Emprego", "CarroForte")
     setElementData(player, "carroforteVehicle", veh)
 
-    playerData[player] = {route = route, step = 1, vehicle = veh}
+    -- Save nearest start position to require returning later
+    local px, py, pz = getElementPosition(player)
+    local nearest = CONFIG.startPositions[1].pos
+    local minDist = getDistanceBetweenPoints3D(px, py, pz, nearest[1], nearest[2], nearest[3])
+    for _, start in ipairs(CONFIG.startPositions) do
+        local dist = getDistanceBetweenPoints3D(px, py, pz, start.pos[1], start.pos[2], start.pos[3])
+        if dist < minDist then
+            minDist = dist
+            nearest = start.pos
+        end
+    end
+
+    playerData[player] = {route = route, step = 1, vehicle = veh, startPos = nearest}
     createNextMarker(player)
+end)
+
+addCommandHandler("finalrota", function(player)
+    local data = playerData[player]
+    if not data or not data.finished then
+        outputMessage(player, "Você ainda não concluiu todas as entregas.", "error")
+        return
+    end
+    local startPos = data.startPos or CONFIG.startPositions[1].pos
+    local x, y, z = getElementPosition(player)
+    if getDistanceBetweenPoints3D(x, y, z, startPos[1], startPos[2], startPos[3]) > 5 then
+        outputMessage(player, "Vá até o ponto inicial para finalizar a rota.", "error")
+        return
+    end
+    if isElement(data.vehicle) then destroyElement(data.vehicle) end
+    if isElement(data.finalBlip) then destroyElement(data.finalBlip) end
+    playerData[player] = nil
+    setElementData(player, "Emprego", nil)
+    outputMessage(player, "Rota finalizada!", "success")
 end)
