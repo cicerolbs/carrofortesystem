@@ -2,10 +2,14 @@ local panelVisible = false
 local routes = {}
 local selectedRoute = nil
 
+local function outputMessage(mess, tipo)
+    return exports['[HS]Notify_System']:notify(mess, tipo)
+end
+
 local screenW, screenH = guiGetScreenSize()
-local panelW, panelH = 400, 300
+local panelW, panelH = 500, 350
 local panelX, panelY = (screenW-panelW)/2, (screenH-panelH)/2
-local startBtn = {x = panelX + 100, y = panelY + panelH - 50, w = 200, h = 40}
+local startBtn = {x = panelX + 150, y = panelY + panelH - 60, w = 200, h = 40}
 
 addEvent("carroforte:openPanel", true)
 addEventHandler("carroforte:openPanel", resourceRoot, function(serverRoutes)
@@ -46,7 +50,7 @@ addEventHandler("onClientClick", root, function(button, state, x, y)
             panelVisible = false
             showCursor(false)
         else
-            outputChatBox("Selecione uma rota primeiro", 255, 0, 0)
+            outputMessage("Selecione uma rota primeiro", "error")
         end
     end
 end)
